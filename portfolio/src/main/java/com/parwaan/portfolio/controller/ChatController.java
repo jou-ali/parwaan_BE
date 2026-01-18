@@ -4,7 +4,7 @@ import com.parwaan.portfolio.dto.ChatRequest;
 import com.parwaan.portfolio.dto.ChatResponse;
 import com.parwaan.portfolio.service.ChatService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
+// import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -16,9 +16,9 @@ public class ChatController {
     private final ChatService chatService;
 
     @PostMapping("/query")
-    public ResponseEntity<ChatResponse> query(@RequestBody ChatRequest request) {
-        ChatResponse response = chatService.getChatResponse(request);
-        return ResponseEntity.ok(response);
+    public java.util.concurrent.CompletableFuture<org.springframework.http.ResponseEntity<ChatResponse>> query(@RequestBody ChatRequest request) {
+        return chatService.getChatResponse(request)
+                .thenApply(org.springframework.http.ResponseEntity::ok);
     }
 
 }

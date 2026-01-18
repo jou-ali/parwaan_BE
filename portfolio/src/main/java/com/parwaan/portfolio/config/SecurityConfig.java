@@ -28,6 +28,7 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/api/projects").permitAll() // Anyone can see the list
                     .requestMatchers(HttpMethod.GET, "/api/projects/**").authenticated() // Must be logged in for details
                     .requestMatchers("/api/projects/**").hasAuthority("ADMIN") // All other methods (POST, PUT, DELETE) require ADMIN
+                    .requestMatchers("/api/chat/**").permitAll() // TEMP: allow unauthenticated access for development
                     .anyRequest().authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

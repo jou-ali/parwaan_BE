@@ -88,6 +88,14 @@
   <artifactId>jjwt-jackson</artifactId>
   <version>0.11.5</version>
 </dependency>
+		<!-- PDF parsing can be added if needed; removed to avoid dependency/API issues during compile -->
+
+		<!-- PDF parsing for document ingestion -->
+		<dependency>
+			<groupId>org.apache.pdfbox</groupId>
+			<artifactId>pdfbox</artifactId>
+			<version>3.0.0</version>
+		</dependency>
 
 
 	</dependencies>
