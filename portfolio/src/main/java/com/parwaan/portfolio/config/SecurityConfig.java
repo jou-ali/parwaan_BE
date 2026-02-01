@@ -25,6 +25,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/api/auth/**").permitAll()
+                    .requestMatchers("/api/donations/**").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/projects").permitAll() // Anyone can see the list
                     .requestMatchers(HttpMethod.GET, "/api/projects/**").authenticated() // Must be logged in for details
                     .requestMatchers("/api/projects/**").hasAuthority("ADMIN") // All other methods (POST, PUT, DELETE) require ADMIN

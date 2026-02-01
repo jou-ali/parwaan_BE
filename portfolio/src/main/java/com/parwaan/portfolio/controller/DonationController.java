@@ -1,36 +1,44 @@
 package com.parwaan.portfolio.controller;
 
-import com.parwaan.portfolio.model.Donation;
-import com.parwaan.portfolio.repository.DonationRepository;
-
-import lombok.Getter;
+import com.parwaan.portfolio.dto.DonationOrderRequest;
+import com.parwaan.portfolio.dto.DonationVerifyRequest;
+import com.parwaan.portfolio.service.DonationService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/donations")
 @CrossOrigin(origins = "http://localhost:3000")
 public class DonationController {
-    private final DonationRepository repo;
-    public DonationController(DonationRepository repo){ this.repo = repo; }
+    private final DonationService donationService;
 
-    @PostMapping("/create-session")
-    public ResponseEntity<?> createSession(@RequestBody CreateRequest r) {
-        Donation d = Donation.builder()
-            .amountCents(r.getAmount())
-            .currency(r.getCurrency())
-            .status("created")
-            .donorEmail(r.getEmail())
-            .build();
-        repo.save(d);
-        return ResponseEntity.ok(Map.of("checkoutUrl", "https://example.com/fake-checkout", "sessionId", d.getId()));
+    public DonationController(DonationService donationService) {
+        this.donationService = donationService;
     }
 
-    @Getter
-    public static class CreateRequest {
-        private Long amount;
-        private String currency;
-        private String email;
+    @PostMapping("/order")
+    public ResponseEntity<?> createOrder(@Valid @RequestBody DonationOrderRequest request) {
+        return ResponseEntity.ok(donationService.createOrder(request));
+    }
+
+    @PostMapping("/verify")
+    public ResponseEntity<?> verifyPayment(@Valid @RequestBody DonationVerifyRequest request) {
+        boolean verified = donationService.verifyPayment(request);
+        if (!verified) {
+            return ResponseEntity.badRequest().body(Map.of("status", "invalid_signature"));
+        }
+        return ResponseEntity.ok(Map.of("status", "paid"));
+    }
+
+    @PostMapping("/webhook")
+    public ResponseEntity<?> handleWebhook(
+            @RequestBody String payload,
+            @RequestHeader("X-Razorpay-Signature") String signature
+    ) {
+        donationService.handleWebhook(payload, signature);
+        return ResponseEntity.ok().build();
     }
 }

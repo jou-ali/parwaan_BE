@@ -6,5 +6,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface DonationRepository extends JpaRepository<Donation, UUID> {
-    Optional<Donation> findByStripeCheckoutSessionId(String sessionId);
+    Optional<Donation> findByRazorpayOrderId(String orderId);
+    Optional<Donation> findByRazorpayPaymentId(String paymentId);
 }

@@ -22,8 +22,9 @@ public class Donation {
     private String status;
     private String donorEmail;
 
-    private String stripePaymentIntentId;
-    private String stripeCheckoutSessionId;
+    private String razorpayOrderId;
+    private String razorpayPaymentId;
+    private String razorpaySignature;
 
     private Instant createdAt;
 
