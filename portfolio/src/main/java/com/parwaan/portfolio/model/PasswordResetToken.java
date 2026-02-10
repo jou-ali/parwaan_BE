@@ -7,35 +7,32 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "donations")
+@Table(name = "password_reset_tokens")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Donation {
+public class PasswordResetToken {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false)
-    private long amount;
+    @Column(nullable = false, unique = true, length = 128)
+    private String token;
+
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
     @Column(nullable = false)
-    private String currency;
+    private Instant expiresAt;
 
     @Column(nullable = false)
-    private String status;
+    @Builder.Default
+    private boolean used = false;
 
-    @Column(name = "donor_email")
-    private String donorEmail;
-
-    @Column(name = "stripe_session_id")
-    private String stripeSessionId;
-
-    @Column(name = "stripe_payment_intent_id")
-    private String stripePaymentIntentId;
-
+    @Column(nullable = false)
     private Instant createdAt;
 
     @PrePersist

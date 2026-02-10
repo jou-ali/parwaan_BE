@@ -1,164 +1,270 @@
 package com.parwaan.portfolio.service;
 
-import com.parwaan.portfolio.dto.DonationOrderRequest;
-import com.parwaan.portfolio.dto.DonationVerifyRequest;
+import com.parwaan.portfolio.dto.DonationCheckoutRequest;
+import com.parwaan.portfolio.dto.DonationCheckoutResponse;
+import com.parwaan.portfolio.dto.DonationLeaderboardEntry;
 import com.parwaan.portfolio.model.Donation;
 import com.parwaan.portfolio.repository.DonationRepository;
-import com.razorpay.Order;
-import com.razorpay.RazorpayClient;
-import com.razorpay.Utils;
+import com.stripe.Stripe;
+import com.stripe.exception.SignatureVerificationException;
+import com.stripe.exception.StripeException;
+import com.stripe.model.Event;
+import com.stripe.model.PaymentIntent;
+import com.stripe.model.checkout.Session;
+import com.stripe.model.EventDataObjectDeserializer;
+import com.stripe.net.Webhook;
+import com.stripe.param.checkout.SessionCreateParams;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class DonationService {
 
     private static final Logger log = LoggerFactory.getLogger(DonationService.class);
 
     private final DonationRepository donationRepository;
+    private final ObjectMapper mapper = new ObjectMapper();
 
-    @Value("${app.razorpay.key-id}")
-    private String razorpayKeyId;
+    @Value("${app.stripe.secret-key:}")
+    private String stripeSecretKey;
 
-    @Value("${app.razorpay.key-secret}")
-    private String razorpayKeySecret;
-
-    @Value("${app.razorpay.webhook-secret}")
-    private String razorpayWebhookSecret;
+    @Value("${app.stripe.webhook-secret:}")
+    private String stripeWebhookSecret;
 
     @Value("${app.donations.currency:inr}")
-    private String currency;
+    private String defaultCurrency;
 
-    private RazorpayClient razorpayClient;
+    @Value("${app.donations.success-url:http://localhost:8080/donations/success}")
+    private String successUrl;
+
+    @Value("${app.donations.cancel-url:http://localhost:8080/donations/failure}")
+    private String cancelUrl;
+
+    public DonationService(DonationRepository donationRepository) {
+        this.donationRepository = donationRepository;
+    }
 
     @PostConstruct
-    public void initRazorpay() {
-        if (razorpayKeyId != null && !razorpayKeyId.isBlank()
-                && razorpayKeySecret != null && !razorpayKeySecret.isBlank()) {
-            try {
-                razorpayClient = new RazorpayClient(razorpayKeyId, razorpayKeySecret);
-            } catch (Exception e) {
-                log.error("Failed to initialize Razorpay client", e);
-            }
+    public void initStripe() {
+        if (stripeSecretKey != null && !stripeSecretKey.isBlank()) {
+            Stripe.apiKey = stripeSecretKey;
         }
     }
 
-    @Transactional
-    public Map<String, Object> createOrder(DonationOrderRequest request) {
-        if (razorpayClient == null) {
-            throw new IllegalStateException("Razorpay keys not configured");
+    public DonationCheckoutResponse createCheckoutSession(DonationCheckoutRequest request) {
+        if (stripeSecretKey == null || stripeSecretKey.isBlank()) {
+            throw new IllegalStateException("Stripe secret key not configured");
         }
-        long amountMinor = Math.multiplyExact(request.getAmountRupees(), 100L);
+
+        long amount = request.getAmount();
+        String currency = request.getCurrency() == null || request.getCurrency().isBlank()
+                ? defaultCurrency
+                : request.getCurrency();
 
         Donation donation = Donation.builder()
-                .amountCents(amountMinor)
+                .amount(amount)
                 .currency(currency)
                 .status("created")
                 .donorEmail(request.getEmail())
                 .build();
         donationRepository.save(donation);
 
-        JSONObject orderRequest = new JSONObject();
-        orderRequest.put("amount", amountMinor);
-        orderRequest.put("currency", currency.toUpperCase());
-        orderRequest.put("receipt", donation.getId().toString());
-        orderRequest.put("payment_capture", 1);
+        SessionCreateParams.Builder paramsBuilder = SessionCreateParams.builder()
+                .setMode(SessionCreateParams.Mode.PAYMENT)
+                .setSuccessUrl(successUrl + "?session_id={CHECKOUT_SESSION_ID}")
+                .setCancelUrl(cancelUrl)
+                .addLineItem(
+                        SessionCreateParams.LineItem.builder()
+                                .setQuantity(1L)
+                                .setPriceData(
+                                        SessionCreateParams.LineItem.PriceData.builder()
+                                                .setCurrency(currency)
+                                                .setUnitAmount(amount)
+                                                .setProductData(
+                                                        SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                                                                .setName("Donation")
+                                                                .build()
+                                                )
+                                                .build()
+                                )
+                                .build()
+                )
+                .putMetadata("donationId", donation.getId().toString())
+                .setPaymentIntentData(
+                        SessionCreateParams.PaymentIntentData.builder()
+                                .putMetadata("donationId", donation.getId().toString())
+                                .build()
+                );
+
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            paramsBuilder.setCustomerEmail(request.getEmail());
+        }
+
+        SessionCreateParams params = paramsBuilder.build();
 
         try {
-            Order order = razorpayClient.orders.create(orderRequest);
-            donation.setRazorpayOrderId(order.get("id"));
+            Session session = Session.create(params);
+            donation.setStripeSessionId(session.getId());
             donationRepository.save(donation);
-            return Map.of(
-                    "orderId", order.get("id"),
-                    "amount", amountMinor,
-                    "currency", currency.toUpperCase(),
-                    "keyId", razorpayKeyId,
-                    "donationId", donation.getId().toString()
-            );
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to create Razorpay order", e);
+            return new DonationCheckoutResponse(session.getUrl(), session.getId());
+        } catch (StripeException e) {
+            log.warn("Failed to create Stripe session: {}", e.getMessage());
+            throw new IllegalStateException("Failed to create checkout session");
         }
     }
 
-    @Transactional
-    public boolean verifyPayment(DonationVerifyRequest request) {
-        if (razorpayKeySecret == null || razorpayKeySecret.isBlank()) {
-            throw new IllegalStateException("Razorpay secret not configured");
-        }
-        try {
-            JSONObject params = new JSONObject();
-            params.put("razorpay_order_id", request.getRazorpayOrderId());
-            params.put("razorpay_payment_id", request.getRazorpayPaymentId());
-            params.put("razorpay_signature", request.getRazorpaySignature());
-
-            boolean verified = Utils.verifyPaymentSignature(params, razorpayKeySecret);
-            if (verified) {
-                donationRepository.findByRazorpayOrderId(request.getRazorpayOrderId())
-                        .ifPresentOrElse(donation -> {
-                            donation.setStatus("paid");
-                            donation.setRazorpayPaymentId(request.getRazorpayPaymentId());
-                            donation.setRazorpaySignature(request.getRazorpaySignature());
-                            donationRepository.save(donation);
-                        }, () -> log.warn("Donation not found for order {}", request.getRazorpayOrderId()));
-            }
-            return verified;
-        } catch (Exception e) {
-            throw new IllegalStateException("Razorpay signature verification failed", e);
-        }
-    }
-
-    @Transactional
     public void handleWebhook(String payload, String signature) {
-        if (razorpayWebhookSecret == null || razorpayWebhookSecret.isBlank()) {
-            throw new IllegalStateException("Razorpay webhook secret not configured");
-        }
-        try {
-            boolean verified = Utils.verifyWebhookSignature(payload, signature, razorpayWebhookSecret);
-            if (!verified) {
-                throw new IllegalStateException("Invalid Razorpay webhook signature");
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("Razorpay webhook verification failed", e);
+        if (stripeWebhookSecret == null || stripeWebhookSecret.isBlank()) {
+            throw new IllegalStateException("Stripe webhook secret not configured");
         }
 
-        JSONObject json = new JSONObject(payload);
-        String event = json.optString("event");
-        if ("payment.captured".equals(event)) {
-            JSONObject payment = json.getJSONObject("payload")
-                    .getJSONObject("payment")
-                    .getJSONObject("entity");
-            String paymentId = payment.getString("id");
-            String orderId = payment.optString("order_id", null);
-            var donationOpt = donationRepository.findByRazorpayPaymentId(paymentId);
-            if (donationOpt.isEmpty() && orderId != null) {
-                donationOpt = donationRepository.findByRazorpayOrderId(orderId);
-            }
-            donationOpt.ifPresentOrElse(donation -> {
-                donation.setStatus("paid");
-                donation.setRazorpayPaymentId(paymentId);
-                donationRepository.save(donation);
-            }, () -> log.warn("Donation not found for payment {}", paymentId));
-        } else if ("payment.failed".equals(event)) {
-            JSONObject payment = json.getJSONObject("payload")
-                    .getJSONObject("payment")
-                    .getJSONObject("entity");
-            String paymentId = payment.getString("id");
-            donationRepository.findByRazorpayPaymentId(paymentId)
-                    .ifPresentOrElse(donation -> {
-                        donation.setStatus("failed");
-                        donationRepository.save(donation);
-                    }, () -> log.warn("Donation not found for payment {}", paymentId));
-        } else {
-            log.debug("Unhandled Razorpay event: {}", event);
+        Event event;
+        try {
+            event = Webhook.constructEvent(payload, signature, stripeWebhookSecret);
+        } catch (SignatureVerificationException e) {
+            throw new IllegalStateException("Invalid Stripe webhook signature");
         }
+
+        if ("checkout.session.completed".equals(event.getType())
+                || "checkout.session.async_payment_succeeded".equals(event.getType())) {
+            String sessionId = extractObjectId(event);
+            if (sessionId == null) {
+                log.warn("Stripe session id missing in webhook event");
+                return;
+            }
+
+            Session session;
+            try {
+                session = Session.retrieve(sessionId);
+            } catch (StripeException e) {
+                log.warn("Failed to retrieve Stripe session {}: {}", sessionId, e.getMessage());
+                return;
+            }
+
+            Donation donation = findOrCreateDonation(session);
+            donation.setStatus("paid");
+            donation.setStripeSessionId(session.getId());
+            donation.setStripePaymentIntentId(session.getPaymentIntent());
+            if (session.getCustomerEmail() != null) {
+                donation.setDonorEmail(session.getCustomerEmail());
+            } else if (session.getCustomerDetails() != null && session.getCustomerDetails().getEmail() != null) {
+                donation.setDonorEmail(session.getCustomerDetails().getEmail());
+            }
+            if (session.getAmountTotal() != null) {
+                donation.setAmount(session.getAmountTotal());
+            }
+            if (session.getCurrency() != null) {
+                donation.setCurrency(session.getCurrency());
+            }
+            donationRepository.save(donation);
+        }
+
+        if ("payment_intent.succeeded".equals(event.getType())) {
+            String paymentIntentId = extractObjectId(event);
+            if (paymentIntentId == null) {
+                log.warn("Stripe payment intent id missing in webhook event");
+                return;
+            }
+            try {
+                PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
+                applyPaymentIntentUpdate(paymentIntent);
+            } catch (StripeException e) {
+                log.warn("Failed to retrieve payment intent {}: {}", paymentIntentId, e.getMessage());
+            }
+        }
+    }
+
+    public List<DonationLeaderboardEntry> getLeaderboard(int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 10));
+        return donationRepository.findByStatusOrderByAmountDesc("paid", PageRequest.of(0, safeLimit))
+                .map(donation -> new DonationLeaderboardEntry(
+                        donation.getDonorEmail(),
+                        donation.getAmount(),
+                        donation.getCurrency(),
+                        donation.getCreatedAt()
+                ))
+                .getContent();
+    }
+
+    private String extractObjectId(Event event) {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        try {
+            String rawJson = deserializer.getRawJson();
+            if (rawJson != null && !rawJson.isBlank()) {
+                JsonNode root = mapper.readTree(rawJson);
+                String id = root.path("id").asText(null);
+                if (id != null && !id.isBlank()) {
+                    return id;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse Stripe event object id: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private Donation findOrCreateDonation(Session session) {
+        Map<String, String> metadata = session.getMetadata();
+        if (metadata != null && metadata.containsKey("donationId")) {
+            String donationId = metadata.get("donationId");
+            try {
+                Optional<Donation> byId = donationRepository.findById(UUID.fromString(donationId));
+                if (byId.isPresent()) {
+                    return byId.get();
+                }
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid donationId in metadata: {}", donationId);
+            }
+        }
+
+        return donationRepository.findByStripeSessionId(session.getId())
+                .orElseGet(() -> donationRepository.save(Donation.builder()
+                        .amount(session.getAmountTotal() == null ? 0L : session.getAmountTotal())
+                        .currency(session.getCurrency() == null ? defaultCurrency : session.getCurrency())
+                        .status("paid")
+                        .stripeSessionId(session.getId())
+                        .stripePaymentIntentId(session.getPaymentIntent())
+                        .donorEmail(session.getCustomerEmail())
+                        .build()));
+    }
+
+    private void applyPaymentIntentUpdate(PaymentIntent paymentIntent) {
+        Map<String, String> metadata = paymentIntent.getMetadata();
+        if (metadata == null || !metadata.containsKey("donationId")) {
+            return;
+        }
+
+        String donationId = metadata.get("donationId");
+        Donation donation;
+        try {
+            donation = donationRepository.findById(UUID.fromString(donationId)).orElse(null);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid donationId in payment intent metadata: {}", donationId);
+            return;
+        }
+        if (donation == null) {
+            return;
+        }
+
+        donation.setStatus("paid");
+        donation.setStripePaymentIntentId(paymentIntent.getId());
+        if (paymentIntent.getAmountReceived() != null) {
+            donation.setAmount(paymentIntent.getAmountReceived());
+        }
+        if (paymentIntent.getCurrency() != null) {
+            donation.setCurrency(paymentIntent.getCurrency());
+        }
+        donationRepository.save(donation);
     }
 }

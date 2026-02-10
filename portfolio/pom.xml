@@ -42,9 +42,19 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
+		
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>com.stripe</groupId>
+			<artifactId>stripe-java</artifactId>
+			<version>31.3.0</version>
 		</dependency>
 
 		<dependency>
@@ -88,6 +98,8 @@
   <artifactId>jjwt-jackson</artifactId>
   <version>0.11.5</version>
 </dependency>
+
+
 		<!-- PDF parsing can be added if needed; removed to avoid dependency/API issues during compile -->
 
 		<!-- PDF parsing for document ingestion -->
@@ -95,11 +107,6 @@
 			<groupId>org.apache.pdfbox</groupId>
 			<artifactId>pdfbox</artifactId>
 			<version>3.0.0</version>
-		</dependency>
-		<dependency>
-			<groupId>com.razorpay</groupId>
-			<artifactId>razorpay-java</artifactId>
-			<version>1.4.6</version>
 		</dependency>
 
 

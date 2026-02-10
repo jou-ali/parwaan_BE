@@ -1,8 +1,11 @@
 package com.parwaan.portfolio.controller;
 
 import com.parwaan.portfolio.dto.AuthResponse;
+import com.parwaan.portfolio.dto.ForgotPasswordRequest;
+import com.parwaan.portfolio.dto.ForgotPasswordResponse;
 import com.parwaan.portfolio.dto.LoginRequest;
 import com.parwaan.portfolio.dto.RegisterRequest;
+import com.parwaan.portfolio.dto.ResetPasswordRequest;
 import com.parwaan.portfolio.dto.UserDto;
 import com.parwaan.portfolio.model.User;
 import com.parwaan.portfolio.service.AuthService;
@@ -31,5 +34,16 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ForgotPasswordResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        return ResponseEntity.ok(authService.forgotPassword(request));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.ok().build();
     }
 }
